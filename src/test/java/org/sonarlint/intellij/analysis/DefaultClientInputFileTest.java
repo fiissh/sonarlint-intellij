@@ -28,12 +28,15 @@ import java.io.InputStreamReader;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Paths;
 import java.util.stream.Collectors;
+import org.apache.commons.lang.SystemUtils;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.ExpectedException;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.Assume.assumeTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -46,17 +49,18 @@ public class DefaultClientInputFileTest {
   @Test
   public void testNoDoc() throws IOException, URISyntaxException {
     VirtualFile vFile = mock(VirtualFile.class);
-    when(vFile.getPath()).thenReturn("file");
+    when(vFile.getPath()).thenReturn("/file");
     when(vFile.contentsToByteArray()).thenReturn("test string".getBytes(StandardCharsets.UTF_8));
     when(vFile.getInputStream()).thenReturn(new ByteArrayInputStream("test string".getBytes(StandardCharsets.UTF_8)));
-    when(vFile.getUrl()).thenReturn("file://file");
+    when(vFile.getUrl()).thenReturn("file:///file");
+    when(vFile.isInLocalFileSystem()).thenReturn(true);
 
     inputFile = new DefaultClientInputFile(vFile, "file", true, StandardCharsets.UTF_8);
 
-    assertThat(inputFile.uri()).isEqualTo(new URI("file://file"));
+    assertThat(inputFile.uri()).isEqualTo(new URI("file:///file"));
     assertThat(inputFile.getCharset()).isEqualTo(StandardCharsets.UTF_8);
     assertThat(inputFile.isTest()).isTrue();
-    assertThat(inputFile.getPath()).isEqualTo("file");
+    assertThat(inputFile.getPath()).isEqualTo("/file");
     assertThat(inputFile.getClientObject()).isEqualTo(vFile);
     assertThat(inputFile.contents()).isEqualTo("test string");
     try (BufferedReader reader = new BufferedReader(new InputStreamReader(inputFile.inputStream()))) {
@@ -67,14 +71,32 @@ public class DefaultClientInputFileTest {
   @Test
   public void testDoc() throws IOException {
     VirtualFile vFile = mock(VirtualFile.class);
+    when(vFile.getPath()).thenReturn("/foo/Bar.php");
     Document doc = mock(Document.class);
     when(doc.getText()).thenReturn("test string");
-    when(vFile.getUrl()).thenReturn("file://foo/Bar.php");
+    when(vFile.getUrl()).thenReturn("file:///foo/Bar.php");
+    when(vFile.isInLocalFileSystem()).thenReturn(true);
     inputFile = new DefaultClientInputFile(vFile, "foo/Bar.php", true, StandardCharsets.UTF_8, doc);
 
     assertThat(inputFile.contents()).isEqualTo("test string");
     try (BufferedReader reader = new BufferedReader(new InputStreamReader(inputFile.inputStream()))) {
       assertThat(reader.lines().collect(Collectors.joining())).isEqualTo("test string");
     }
+  }
+
+  @Test
+  public void testWindowsFile() throws URISyntaxException {
+    assumeTrue(SystemUtils.IS_OS_WINDOWS);
+    VirtualFile vFile = mock(VirtualFile.class);
+    when(vFile.isInLocalFileSystem()).thenReturn(true);
+    when(vFile.getPath()).thenReturn("C:/My Projects/sonar-clirr/src/main/java/org/sonar/plugins/clirr/ClirrSensor.java");
+    // We will not use getUrl() as it is broken, but I keep the mock to document the issue
+    when(vFile.getUrl()).thenReturn("file://C:/My Projects/sonar-clirr/src/main/java/org/sonar/plugins/clirr/ClirrSensor.java");
+
+    inputFile = new DefaultClientInputFile(vFile, "unused", true, StandardCharsets.UTF_8);
+
+    // This check is important to have the URIPredicate working (see SLI-379)
+    assertThat(Paths.get(inputFile.getPath()).toUri()).isEqualTo(inputFile.uri());
+    assertThat(inputFile.uri()).isEqualTo(new URI("file:///C:/My%20Projects/sonar-clirr/src/main/java/org/sonar/plugins/clirr/ClirrSensor.java"));
   }
 }
